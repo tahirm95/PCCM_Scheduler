@@ -1921,7 +1921,15 @@ STAGE1_TIME = 240
 STAGE2_TIME = 360
 STAGE3_TIME = 1800
 NUM_WORKERS = 8
-SINGLE_RUN_OUTPUT_DIR = "/content/drive/MyDrive/Colab_Notebook"
+OUTPUT_BASE_DIR = "/content/drive/MyDrive/Colab_Notebook"
+RUN_FOLDER_NAME = ""  # Set e.g. "attempt_72"; blank auto-generates a timestamped folder.
+
+
+def resolve_output_dir(base_dir: str, run_folder_name: str = "") -> str:
+    name = run_folder_name.strip()
+    if not name:
+        name = f"run_{time.strftime('%Y%m%d_%H%M%S')}"
+    return str(Path(base_dir) / name)
 
 def run_three_stage(stage1_time: int, stage2_time: int, stage3_time: int, output_dir: str):
     global WEIGHTS
@@ -2012,7 +2020,9 @@ def run_three_stage(stage1_time: int, stage2_time: int, stage3_time: int, output
     result["run_seconds"] = round(time.time() - start, 1)
     return result
 
+run_output_dir = resolve_output_dir(OUTPUT_BASE_DIR, RUN_FOLDER_NAME)
 print(f"Max times (s): Stage1={STAGE1_TIME}, Stage2={STAGE2_TIME}, Stage3={STAGE3_TIME}")
-result = run_three_stage(STAGE1_TIME, STAGE2_TIME, STAGE3_TIME, SINGLE_RUN_OUTPUT_DIR)
+print(f"Output folder: {run_output_dir}")
+result = run_three_stage(STAGE1_TIME, STAGE2_TIME, STAGE3_TIME, run_output_dir)
 if result and "run_seconds" in result:
     print(f"Total runtime (s): {result['run_seconds']}")
