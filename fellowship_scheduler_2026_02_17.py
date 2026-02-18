@@ -974,6 +974,15 @@ def build_model():
                 var(f, wp, "MICU1") + var(f, wp, "MICU2") for wp in range(w)
             )
             model.Add(prior_any_micu >= 1).OnlyEnforceIf(var(f, w, "NF"))
+
+    # PGY-4 MICU ordering hard rule: MICU1 must occur before any MICU2.
+    for f in PGY4:
+        for w in range(W):
+            if w == 0:
+                model.Add(var(f, w, "MICU2") == 0)
+                continue
+            prior_micu1 = sum(var(f, wp, "MICU1") for wp in range(w))
+            model.Add(prior_micu1 >= 1).OnlyEnforceIf(var(f, w, "MICU2"))
     
     # PGY-4 MICU first-time rule: at most one PGY-4 can have their first MICU week
     # (MICU1 or MICU2) in the same week.
