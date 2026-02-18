@@ -150,8 +150,8 @@ ROTATIONS = [
     "PHTN"
 ]
 
-HARD = {"PULM", "BRONCH", "MICU1", "TPLT", "RRT", "CCU", "NF", "PHTN"}
-MEDIUM = {"MICU2", "SICU", "NSICU"}
+HARD = {"PULM", "BRONCH", "MICU1", "MICU2", "RRT", "CCU", "NF", "PHTN"}
+MEDIUM = {"TPLT", "SICU", "NSICU"}
 EASY = {"ELECT", "PHYSIO", "RADS", "RIF", "RSCH", "AIRWAY", "VACA", "ONBD"}
 
 # Rotation eligibility by PGY
