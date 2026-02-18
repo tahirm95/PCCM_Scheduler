@@ -43,6 +43,10 @@ AIRWAY_PGY4_START = date(2026, 9, 28)
 # PGY-4: only during or after the week of 11/2/26
 TPLT_PGY4_START = date(2026, 11, 2)
 
+# NF rules
+# PGY-4: only during or after the week of 3/15/27
+NF_PGY4_START = date(2027, 3, 15)
+
 # Vacation blackouts
 PGY4_NO_VACA_BEFORE = date(2026, 7, 27)
 PGY4_NO_VACA_WEEKS = {ATS_WEEK, CHEST_WEEK, date(2027, 6, 14), date(2027, 6, 21)}
@@ -534,6 +538,8 @@ RRT_CCU_WEEKS = weeks_in_range(RRT_CCU_START, date(2027, 6, 21))
 AIRWAY_PGY4_WEEKS = weeks_on_or_after(AIRWAY_PGY4_START)
 # TPLT allowed weeks (PGY-4 only)
 TPLT_PGY4_WEEKS = weeks_on_or_after(TPLT_PGY4_START)
+# NF allowed weeks (PGY-4 only)
+NF_PGY4_WEEKS = weeks_on_or_after(NF_PGY4_START)
 
 # Pre-1/4/27 weeks (for MICU PGY-4 constraint)
 PRE_MISD_WEEKS = [i for i, d in enumerate(WEEK_STARTS) if d < date(2027, 1, 4)]
@@ -646,6 +652,9 @@ def build_model():
 
                 if w not in TPLT_PGY4_WEEKS:
                     model.Add(var(f, w, "TPLT") == 0)
+
+                if w not in NF_PGY4_WEEKS:
+                    model.Add(var(f, w, "NF") == 0)
 
             # Internal Medicine boards blackout: PGY-4 cannot be on specified
             # high-acuity rotations during their boards week.
