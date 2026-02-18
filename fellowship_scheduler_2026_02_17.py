@@ -112,6 +112,8 @@ NON_SINAI_PGY4_NAMES = {"HD", "VK"}
 # PGY-6 Chiefs (update yearly)
 PGY6_CHIEF_NAMES = {"AD", "TM"}
 TM_RSCH_WEEKS = {date(2026, 11, 23), date(2026, 11, 30)}
+# AD must be on RSCH during these week-containing dates
+AD_RSCH_WEEK_DATES = {date(2026, 11, 23), date(2026, 12, 21), date(2026, 12, 28)}
 
 PGY_VAC_PRIORITY_MULT = {6: 3, 5: 2, 4: 1}  # higher = higher priority
 
@@ -485,6 +487,7 @@ def weeks_on_or_after(d: date) -> List[int]:
     return [i for i, dt in enumerate(WEEK_STARTS) if dt >= d]
 
 
+
 # Pre/post ranges for BRONCH
 PRE_WEEKS = weeks_before(PRE_POST_BOUNDARY)
 POST_WEEKS = weeks_on_or_after(PRE_POST_BOUNDARY)
@@ -498,6 +501,7 @@ ATS_WEEK_IDX = widx(ATS_WEEK)
 CHEST_WEEK_IDX = widx(CHEST_WEEK)
 PULM_BOARDS_WEEK_IDX = widx(PULM_BOARDS_WEEK)
 ONBD_WEEK_IDX = widx(ONBD_WEEK)
+AD_RSCH_WEEKS = [widx(d) for d in sorted(AD_RSCH_WEEK_DATES)]
 
 # RRT/CCU window indices
 RRT_CCU_WEEKS = weeks_in_range(RRT_CCU_START, date(2027, 6, 21))
@@ -637,6 +641,11 @@ def build_model():
     # TM must be on RSCH for specified weeks
     for d in TM_RSCH_WEEKS:
         model.Add(var(TM_IDX, widx(d), "RSCH") == 1)
+
+    # AD must be on RSCH for specified weeks
+    ad_idx = next(i for i, (name, _) in enumerate(FELLOWS) if name == "AD")
+    for w in AD_RSCH_WEEKS:
+        model.Add(var(ad_idx, w, "RSCH") == 1)
 
     # TM must have exactly 2 weeks of MICU1 and 2 weeks of MICU2
     model.Add(sum(var(TM_IDX, w, "MICU1") for w in range(W)) == 2)
