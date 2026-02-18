@@ -2012,7 +2012,7 @@ def weights_for_stage(stage: int):
         return {k: (BASE_WEIGHTS[k] if k in VAC_KEYS.union(PGY4_ONLY_KEYS) else 0) for k in BASE_WEIGHTS}
     return BASE_WEIGHTS
 
-STAGE1_TIME = 240
+STAGE1_TIME = 300
 STAGE2_TIME = 360
 STAGE3_TIME = 600
 NUM_WORKERS = 8
