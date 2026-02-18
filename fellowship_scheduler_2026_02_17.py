@@ -104,6 +104,12 @@ WEIGHTS = {
     "pgy4_pre_im_boards_medium": 20,
     "pgy4_pre_im_boards_hard": 60,
     "rsch_exact3": 40,
+    "clinic_underfill_tier1": 25,
+    "clinic_underfill_tier2": 60,
+    "clinic_underfill_tier3": 110,
+    "clinic_underfill_tier4": 180,
+    "clinic_underfill_tier5": 260,
+    "clinic_underfill_tier6": 350,
 }
 
 BASE_WEIGHTS = WEIGHTS.copy()
@@ -159,6 +165,9 @@ ROTATIONS = [
 HARD = {"PULM", "BRONCH", "MICU1", "MICU2", "RRT", "CCU", "NF", "PHTN"}
 MEDIUM = {"TPLT", "SICU", "NSICU"}
 EASY = {"ELECT", "PHYSIO", "RADS", "RIF", "RSCH", "AIRWAY", "VACA", "ONBD"}
+
+CLINIC_ELIGIBLE_ROTATIONS = ("ELECT", "RADS", "RIF", "RSCH")
+CLINIC_TARGET_PER_WEEK = 6
 
 # Rotation eligibility by PGY
 ALLOWED_PGY = {r: {4, 5, 6} for r in ROTATIONS}
@@ -878,6 +887,7 @@ def build_model():
         "fair_hard": [],
         "fair_micu6": [],
         "fair_phtn": [],
+        "clinic_underfill": [],
     }
 
     # Prefer RSCH coverage > 3 by penalizing weeks with exactly 3 RSCH.
@@ -1675,6 +1685,38 @@ def build_model():
             objective_terms.append(WEIGHTS["rif_when_rads_min"] * rif_when_min)
             soft_report["rif_when_rads_min"].append((f, w, rif_when_min))
     
+    # Prefer at least 6 fellows on clinic weekly (eligible: ELECT/RADS/RIF/RSCH).
+    clinic_tier_weights = [
+        WEIGHTS["clinic_underfill_tier1"],
+        WEIGHTS["clinic_underfill_tier2"],
+        WEIGHTS["clinic_underfill_tier3"],
+        WEIGHTS["clinic_underfill_tier4"],
+        WEIGHTS["clinic_underfill_tier5"],
+        WEIGHTS["clinic_underfill_tier6"],
+    ]
+    for w in range(W):
+        clinic_count = model.NewIntVar(0, F, f"clinic_count_w{w}")
+        model.Add(
+            clinic_count
+            == sum(var(f, w, rname) for f in range(F) for rname in CLINIC_ELIGIBLE_ROTATIONS)
+        )
+
+        clinic_gap = model.NewIntVar(-F, CLINIC_TARGET_PER_WEEK, f"clinic_gap_w{w}")
+        model.Add(clinic_gap == CLINIC_TARGET_PER_WEEK - clinic_count)
+
+        underfill = model.NewIntVar(0, CLINIC_TARGET_PER_WEEK, f"clinic_underfill_w{w}")
+        model.AddMaxEquality(underfill, [0, clinic_gap])
+
+        tier_flags = []
+        for tier in range(1, CLINIC_TARGET_PER_WEEK + 1):
+            is_tier_active = model.NewBoolVar(f"clinic_underfill_ge_{tier}_w{w}")
+            model.Add(underfill >= tier).OnlyEnforceIf(is_tier_active)
+            model.Add(underfill <= tier - 1).OnlyEnforceIf(is_tier_active.Not())
+            objective_terms.append(clinic_tier_weights[tier - 1] * is_tier_active)
+            tier_flags.append(is_tier_active)
+
+        soft_report["clinic_underfill"].append((w, clinic_count, underfill, tier_flags))
+
     # Objective
     model.Minimize(sum(objective_terms))
     
@@ -1714,12 +1756,50 @@ def write_reports(solver, var, soft_report, suffix: str, output_dir: str = "."):
     print("\nRotation totals (per fellow):")
     print(summary_df)
 
+    # Clinic summaries
+    clinic_weekly = []
+    for w in range(W_local):
+        clinic_count = sum(
+            solver.Value(var(f, w, rname))
+            for f in range(len(FELLOWS))
+            for rname in CLINIC_ELIGIBLE_ROTATIONS
+        )
+        clinic_weekly.append({
+            "WeekStart": WEEK_STARTS[w].isoformat(),
+            "ClinicCount": clinic_count,
+            "Target": CLINIC_TARGET_PER_WEEK,
+            "Underfill": max(0, CLINIC_TARGET_PER_WEEK - clinic_count),
+        })
+    clinic_weekly_df = pd.DataFrame(clinic_weekly)
+
+    clinic_totals = []
+    for f, (name, _) in enumerate(FELLOWS):
+        total = sum(
+            solver.Value(var(f, w, rname))
+            for w in range(W_local)
+            for rname in CLINIC_ELIGIBLE_ROTATIONS
+        )
+        clinic_totals.append({"Fellow": name, "ClinicWeeks": total})
+    clinic_totals_df = pd.DataFrame(clinic_totals)
+
+    print("\nClinic counts by week:")
+    print(clinic_weekly_df)
+    print("\nClinic totals (per fellow):")
+    print(clinic_totals_df)
+
     # Save outputs
     schedule_path = out_dir / f"schedule_by_week_{suffix}.csv"
     totals_path = out_dir / f"rotation_totals_{suffix}.csv"
+    clinic_weekly_path = out_dir / f"clinic_weekly_counts_{suffix}.csv"
+    clinic_totals_path = out_dir / f"clinic_totals_{suffix}.csv"
     df.to_csv(schedule_path, index=False)
     summary_df.to_csv(totals_path, index=False)
-    print(f"\nWrote: {schedule_path}, {totals_path}")
+    clinic_weekly_df.to_csv(clinic_weekly_path, index=False)
+    clinic_totals_df.to_csv(clinic_totals_path, index=False)
+    print(
+        f"\nWrote: {schedule_path}, {totals_path}, "
+        f"{clinic_weekly_path}, {clinic_totals_path}"
+    )
 
     # Soft constraint report
     soft_rows = []
@@ -2002,6 +2082,30 @@ def write_reports(solver, var, soft_report, suffix: str, output_dir: str = "."):
                 "weight": weight,
                 "penalty": weight,
             })
+
+    clinic_tier_weights = [
+        WEIGHTS["clinic_underfill_tier1"],
+        WEIGHTS["clinic_underfill_tier2"],
+        WEIGHTS["clinic_underfill_tier3"],
+        WEIGHTS["clinic_underfill_tier4"],
+        WEIGHTS["clinic_underfill_tier5"],
+        WEIGHTS["clinic_underfill_tier6"],
+    ]
+    for w, clinic_count, underfill, tier_flags in soft_report["clinic_underfill"]:
+        underfill_val = solver.Value(underfill)
+        if underfill_val <= 0:
+            continue
+        penalty = sum(
+            clinic_tier_weights[i] * solver.Value(flag) for i, flag in enumerate(tier_flags)
+        )
+        soft_rows.append({
+            "constraint": "clinic_underfill",
+            "fellow": "",
+            "week": WEEK_STARTS[w].isoformat(),
+            "detail": f"clinic_count={solver.Value(clinic_count)} target={CLINIC_TARGET_PER_WEEK} underfill={underfill_val}",
+            "weight": "+".join(str(wt) for wt in clinic_tier_weights),
+            "penalty": penalty,
+        })
 
     soft_df = pd.DataFrame(soft_rows)
     soft_path = out_dir / f"soft_constraint_report_{suffix}.csv"
