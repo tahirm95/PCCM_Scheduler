@@ -97,6 +97,8 @@ WEIGHTS = {
     "pgy6_pre_boards_rsch": 350,
     "fair_phtn_range": 250,
     "non_sinai_pgy4_micu_early": 300,
+    "pgy4_pre_im_boards_medium": 20,
+    "pgy4_pre_im_boards_hard": 60,
     "rsch_exact3": 40,
 }
 
@@ -862,6 +864,7 @@ def build_model():
         "pgy6_pre_boards_rsch": [],
         "pgy6_last8_rsch_vaca": [],
         "non_sinai_pgy4_micu_early": [],
+        "pgy4_pre_im_boards_tier": [],
         "rsch_exact3": [],
         "fair_hard": [],
         "fair_micu6": [],
@@ -1568,6 +1571,37 @@ def build_model():
                     objective_terms.append(WEIGHTS["rsch_around_vaca"] * (is_end - after_rsch))
                     soft_report["rsch_around_vaca"].append((f, w, "after", is_end, after_rsch))
     
+    # PGY-4 IM boards prep preference in the 4 weeks before boards week:
+    # EASY preferred most, then MEDIUM, then HARD (with proximity ramping).
+    pre_im_curve = [1, 1, 2, 3]  # farther -> closer to boards
+    pre_im_medium_w = WEIGHTS["pgy4_pre_im_boards_medium"]
+    pre_im_hard_w = WEIGHTS["pgy4_pre_im_boards_hard"]
+
+    for f in PGY4:
+        fellow_name = FELLOWS[f][0]
+        if fellow_name not in IM_BOARDS_BLACKOUT_WEEKS:
+            continue
+
+        boards_w = IM_BOARDS_BLACKOUT_WEEKS[fellow_name]
+        pre_weeks = [boards_w - 4 + i for i in range(4) if 0 <= boards_w - 4 + i < W]
+        if not pre_weeks:
+            continue
+
+        for i, w in enumerate(pre_weeks):
+            ramp = pre_im_curve[-len(pre_weeks) + i]
+
+            is_medium = model.NewBoolVar(f"pgy4_preim_medium_f{f}_w{w}")
+            model.Add(is_medium == sum(var(f, w, r) for r in MEDIUM))
+
+            is_hard = model.NewBoolVar(f"pgy4_preim_hard_f{f}_w{w}")
+            model.Add(is_hard == sum(var(f, w, r) for r in HARD))
+
+            medium_pen = pre_im_medium_w * ramp
+            hard_pen = pre_im_hard_w * ramp
+            objective_terms.append(medium_pen * is_medium)
+            objective_terms.append(hard_pen * is_hard)
+            soft_report["pgy4_pre_im_boards_tier"].append((f, w, ramp, is_medium, is_hard))
+
     # Pulmonary Boards: prefer PGY-6 on EASY rotations in the 4 weeks prior (weighted toward the end)
     pre_boards_weeks = [w for w, d in enumerate(WEEK_STARTS) if PULM_BOARDS_WEEK - timedelta(days=28) <= d < PULM_BOARDS_WEEK]
     pre_boards_curve = [1, 1, 2, 3]
@@ -1908,6 +1942,31 @@ def write_reports(solver, var, soft_report, suffix: str, output_dir: str = "."):
                 "detail": "EASY rotations weighted toward boards",
                 "weight": 350,
                 "penalty": pen_val,
+            })
+
+    # PGY-4 IM boards prep tiered preference
+    for f, w, ramp, is_medium, is_hard in soft_report["pgy4_pre_im_boards_tier"]:
+        medium_val = solver.Value(is_medium)
+        hard_val = solver.Value(is_hard)
+        if medium_val == 1:
+            weight = WEIGHTS["pgy4_pre_im_boards_medium"] * ramp
+            soft_rows.append({
+                "constraint": "pgy4_pre_im_boards_medium",
+                "fellow": FELLOWS[f][0],
+                "week": WEEK_STARTS[w].isoformat(),
+                "detail": f"pre-boards medium (ramp={ramp})",
+                "weight": weight,
+                "penalty": weight,
+            })
+        if hard_val == 1:
+            weight = WEIGHTS["pgy4_pre_im_boards_hard"] * ramp
+            soft_rows.append({
+                "constraint": "pgy4_pre_im_boards_hard",
+                "fellow": FELLOWS[f][0],
+                "week": WEEK_STARTS[w].isoformat(),
+                "detail": f"pre-boards hard (ramp={ramp})",
+                "weight": weight,
+                "penalty": weight,
             })
 
     # PGY-6 last 8 weeks RSCH/VACA preference (weighted)
