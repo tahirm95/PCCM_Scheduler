@@ -465,6 +465,7 @@ DD_IDX = next(i for i, (name, _) in enumerate(FELLOWS) if name == "DD")
 NON_SINAI_PGY4 = [i for i, (name, pgy) in enumerate(FELLOWS) if pgy == 4 and name in NON_SINAI_PGY4_NAMES]
 PGY6_CHIEFS = [i for i, (name, pgy) in enumerate(FELLOWS) if pgy == 6 and name in PGY6_CHIEF_NAMES]
 TM_IDX = next(i for i, (name, _) in enumerate(FELLOWS) if name == "TM")
+YA_IDX = next(i for i, (name, _) in enumerate(FELLOWS) if name == "YA")
 
 ROT_IDX = {r: i for i, r in enumerate(ROTATIONS)}
 
@@ -646,6 +647,12 @@ def build_model():
     ad_idx = next(i for i, (name, _) in enumerate(FELLOWS) if name == "AD")
     for w in AD_RSCH_WEEKS:
         model.Add(var(ad_idx, w, "RSCH") == 1)
+
+    # AD must have exactly 2 BRONCH weeks
+    model.Add(sum(var(ad_idx, w, "BRONCH") for w in range(W)) == 2)
+
+    # YA must be on MICU2 on the first week (6/29/26)
+    model.Add(var(YA_IDX, ONBD_WEEK_IDX, "MICU2") == 1)
 
     # TM must have exactly 2 weeks of MICU1 and 2 weeks of MICU2
     model.Add(sum(var(TM_IDX, w, "MICU1") for w in range(W)) == 2)
