@@ -104,12 +104,12 @@ WEIGHTS = {
     "pgy4_pre_im_boards_medium": 20,
     "pgy4_pre_im_boards_hard": 60,
     "rsch_exact3": 40,
-    "clinic_underfill_tier1": 25,
-    "clinic_underfill_tier2": 60,
-    "clinic_underfill_tier3": 110,
-    "clinic_underfill_tier4": 180,
-    "clinic_underfill_tier5": 260,
-    "clinic_underfill_tier6": 350,
+    "clinic_underfill_tier1": 50,
+    "clinic_underfill_tier2": 100,
+    "clinic_underfill_tier3": 150,
+    "clinic_underfill_tier4": 200,
+    "clinic_underfill_tier5": 300,
+    "clinic_underfill_tier6": 400,
 }
 
 BASE_WEIGHTS = WEIGHTS.copy()
