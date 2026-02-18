@@ -1955,7 +1955,7 @@ def weights_for_stage(stage: int):
 
 STAGE1_TIME = 240
 STAGE2_TIME = 360
-STAGE3_TIME = 1800
+STAGE3_TIME = 600
 NUM_WORKERS = 8
 OUTPUT_BASE_DIR = "/content/drive/MyDrive/Colab_Notebook"
 RUN_FOLDER_NAME = ""  # Set e.g. "attempt_72"; blank auto-generates a timestamped folder.
