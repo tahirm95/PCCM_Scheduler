@@ -115,6 +115,18 @@ TM_RSCH_WEEKS = {date(2026, 11, 23), date(2026, 11, 30)}
 # AD must be on RSCH during these week-containing dates
 AD_RSCH_WEEK_DATES = {date(2026, 11, 23), date(2026, 12, 21), date(2026, 12, 28)}
 
+# Internal Medicine Boards blackout dates for PGY-4s.
+# Fellows listed here cannot be on these rotations during their boards week.
+IM_BOARDS_BLACKOUT_DATES = {
+    "BX": date(2026, 8, 19),
+    "JD": date(2026, 8, 18),
+    "HD": date(2026, 8, 25),
+    "DD": date(2026, 8, 27),
+    "NM": date(2026, 11, 10),
+    "VK": None,  # Not taking IM boards
+}
+IM_BOARDS_BLOCKED_ROTATIONS = {"PULM", "MICU1", "MICU2", "BRONCH"}
+
 PGY_VAC_PRIORITY_MULT = {6: 3, 5: 2, 4: 1}  # higher = higher priority
 
 # Runtime sweep (optional)
@@ -488,6 +500,10 @@ def weeks_on_or_after(d: date) -> List[int]:
     return [i for i, dt in enumerate(WEEK_STARTS) if dt >= d]
 
 
+def week_start_for_date(d: date) -> date:
+    """Return Monday week-start for any date."""
+    return d - timedelta(days=d.weekday())
+
 
 # Pre/post ranges for BRONCH
 PRE_WEEKS = weeks_before(PRE_POST_BOUNDARY)
@@ -503,6 +519,11 @@ CHEST_WEEK_IDX = widx(CHEST_WEEK)
 PULM_BOARDS_WEEK_IDX = widx(PULM_BOARDS_WEEK)
 ONBD_WEEK_IDX = widx(ONBD_WEEK)
 AD_RSCH_WEEKS = [widx(d) for d in sorted(AD_RSCH_WEEK_DATES)]
+IM_BOARDS_BLACKOUT_WEEKS = {
+    name: widx(week_start_for_date(d))
+    for name, d in IM_BOARDS_BLACKOUT_DATES.items()
+    if d is not None
+}
 
 # RRT/CCU window indices
 RRT_CCU_WEEKS = weeks_in_range(RRT_CCU_START, date(2027, 6, 21))
@@ -623,6 +644,14 @@ def build_model():
 
                 if w not in TPLT_PGY4_WEEKS:
                     model.Add(var(f, w, "TPLT") == 0)
+
+            # Internal Medicine boards blackout: PGY-4 cannot be on specified
+            # high-acuity rotations during their boards week.
+            fellow_name = FELLOWS[f][0]
+            if fellow_name in IM_BOARDS_BLACKOUT_WEEKS:
+                bw = IM_BOARDS_BLACKOUT_WEEKS[fellow_name]
+                for rname in IM_BOARDS_BLOCKED_ROTATIONS:
+                    model.Add(var(f, bw, rname) == 0)
     
         # RRT/CCU only in window
         for w in range(W):
