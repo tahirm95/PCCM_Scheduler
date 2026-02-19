@@ -2243,17 +2243,16 @@ def run_three_stage(stage1_time: int, stage2_time: int, stage3_time: int, output
 # END inlined scheduler code
 # ---------------------------
 
-import argparse
 import csv
 from collections import defaultdict
 from pathlib import Path
 from ortools.sat.python import cp_model
 
-# In-file defaults (used when CLI flags are omitted).
-DEFAULT_MODE = "bound"
-DEFAULT_TIME_LIMIT = 600
-DEFAULT_WORKERS = 8
-DEFAULT_OUTPUT_DIR = "max_penalty_outputs"
+# Colab in-file settings (edit these directly before running the cell/script).
+RUN_MODE = "bound"  # "exact" or "bound"
+RUN_TIME_LIMIT = 600
+RUN_WORKERS = 8
+RUN_OUTPUT_DIR = "max_penalty_outputs"
 
 
 def _flip_to_maximize(model: cp_model.CpModel) -> None:
@@ -2373,21 +2372,16 @@ def run_bound(out_dir: Path):
     print(f"Per-constraint bucket CSV: {breakdown_csv}")
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="Maximum penalty calculator")
-    parser.add_argument("--mode", choices=["exact", "bound"], default=DEFAULT_MODE)
-    parser.add_argument("--time-limit", type=int, default=DEFAULT_TIME_LIMIT)
-    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
-    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
-    args = parser.parse_args(argv)
-
-    out_dir = Path(args.output_dir)
+def main():
+    out_dir = Path(RUN_OUTPUT_DIR)
     _ensure_output_dir(out_dir)
 
-    if args.mode == "exact":
-        run_exact(args.time_limit, args.workers, out_dir)
-    else:
+    if RUN_MODE == "exact":
+        run_exact(RUN_TIME_LIMIT, RUN_WORKERS, out_dir)
+    elif RUN_MODE == "bound":
         run_bound(out_dir)
+    else:
+        raise ValueError("RUN_MODE must be 'exact' or 'bound'.")
 
 
 if __name__ == "__main__":
