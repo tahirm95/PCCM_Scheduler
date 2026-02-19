@@ -22,6 +22,12 @@ from ortools.sat.python import cp_model
 
 SCHEDULER_FILE = Path(__file__).with_name("fellowship_scheduler_2026_02_17.py")
 
+# In-file defaults (used when CLI flags are omitted).
+DEFAULT_MODE = "bound"
+DEFAULT_TIME_LIMIT = 600
+DEFAULT_WORKERS = 8
+DEFAULT_OUTPUT_DIR = "max_penalty_outputs"
+
 
 def _load_scheduler_namespace(maximize: bool) -> dict:
     src = SCHEDULER_FILE.read_text()
@@ -189,13 +195,13 @@ def run_bound(out_dir: Path) -> Path:
     return breakdown_csv
 
 
-def main() -> None:
+def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description="Maximum penalty calculator")
-    parser.add_argument("--mode", choices=["exact", "bound"], required=True)
-    parser.add_argument("--time-limit", type=int, default=600, help="Exact mode: solve time limit in seconds")
-    parser.add_argument("--workers", type=int, default=8, help="Exact mode: CP-SAT workers")
-    parser.add_argument("--output-dir", default="max_penalty_outputs")
-    args = parser.parse_args()
+    parser.add_argument("--mode", choices=["exact", "bound"], default=DEFAULT_MODE)
+    parser.add_argument("--time-limit", type=int, default=DEFAULT_TIME_LIMIT, help="Exact mode: solve time limit in seconds")
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="Exact mode: CP-SAT workers")
+    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
+    args = parser.parse_args(argv)
 
     out_dir = Path(args.output_dir)
     _ensure_output_dir(out_dir)
