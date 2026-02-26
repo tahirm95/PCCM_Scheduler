@@ -97,6 +97,8 @@ WEIGHTS = {
     "pgy6_pre_boards_rsch": 350,
     "fair_phtn_range": 250,
     "non_sinai_pgy4_micu_early": 300,
+    "pgy4_pre_im_boards_medium": 20,
+    "pgy4_pre_im_boards_hard": 60,
     "rsch_exact3": 40,
 }
 
@@ -112,6 +114,20 @@ NON_SINAI_PGY4_NAMES = {"HD", "VK"}
 # PGY-6 Chiefs (update yearly)
 PGY6_CHIEF_NAMES = {"AD", "TM"}
 TM_RSCH_WEEKS = {date(2026, 11, 23), date(2026, 11, 30)}
+# AD must be on RSCH during these week-containing dates
+AD_RSCH_WEEK_DATES = {date(2026, 11, 23), date(2026, 12, 21), date(2026, 12, 28)}
+
+# Internal Medicine Boards blackout dates for PGY-4s.
+# Fellows listed here cannot be on these rotations during their boards week.
+IM_BOARDS_BLACKOUT_DATES = {
+    "BX": date(2026, 8, 19),
+    "JD": date(2026, 8, 18),
+    "HD": date(2026, 8, 25),
+    "DD": date(2026, 8, 27),
+    "NM": date(2026, 11, 10),
+    "VK": None,  # Not taking IM boards
+}
+IM_BOARDS_BLOCKED_ROTATIONS = {"PULM", "MICU1", "MICU2", "BRONCH"}
 
 PGY_VAC_PRIORITY_MULT = {6: 3, 5: 2, 4: 1}  # higher = higher priority
 
@@ -136,8 +152,8 @@ ROTATIONS = [
     "PHTN"
 ]
 
-HARD = {"PULM", "BRONCH", "MICU1", "TPLT", "RRT", "CCU", "NF", "PHTN"}
-MEDIUM = {"MICU2", "SICU", "NSICU"}
+HARD = {"PULM", "BRONCH", "MICU1", "MICU2", "RRT", "CCU", "NF", "PHTN"}
+MEDIUM = {"TPLT", "SICU", "NSICU"}
 EASY = {"ELECT", "PHYSIO", "RADS", "RIF", "RSCH", "AIRWAY", "VACA", "ONBD"}
 
 # Rotation eligibility by PGY
@@ -463,6 +479,7 @@ DD_IDX = next(i for i, (name, _) in enumerate(FELLOWS) if name == "DD")
 NON_SINAI_PGY4 = [i for i, (name, pgy) in enumerate(FELLOWS) if pgy == 4 and name in NON_SINAI_PGY4_NAMES]
 PGY6_CHIEFS = [i for i, (name, pgy) in enumerate(FELLOWS) if pgy == 6 and name in PGY6_CHIEF_NAMES]
 TM_IDX = next(i for i, (name, _) in enumerate(FELLOWS) if name == "TM")
+YA_IDX = next(i for i, (name, _) in enumerate(FELLOWS) if name == "YA")
 
 ROT_IDX = {r: i for i, r in enumerate(ROTATIONS)}
 
@@ -485,6 +502,11 @@ def weeks_on_or_after(d: date) -> List[int]:
     return [i for i, dt in enumerate(WEEK_STARTS) if dt >= d]
 
 
+def week_start_for_date(d: date) -> date:
+    """Return Monday week-start for any date."""
+    return d - timedelta(days=d.weekday())
+
+
 # Pre/post ranges for BRONCH
 PRE_WEEKS = weeks_before(PRE_POST_BOUNDARY)
 POST_WEEKS = weeks_on_or_after(PRE_POST_BOUNDARY)
@@ -498,6 +520,12 @@ ATS_WEEK_IDX = widx(ATS_WEEK)
 CHEST_WEEK_IDX = widx(CHEST_WEEK)
 PULM_BOARDS_WEEK_IDX = widx(PULM_BOARDS_WEEK)
 ONBD_WEEK_IDX = widx(ONBD_WEEK)
+AD_RSCH_WEEKS = [widx(d) for d in sorted(AD_RSCH_WEEK_DATES)]
+IM_BOARDS_BLACKOUT_WEEKS = {
+    name: widx(week_start_for_date(d))
+    for name, d in IM_BOARDS_BLACKOUT_DATES.items()
+    if d is not None
+}
 
 # RRT/CCU window indices
 RRT_CCU_WEEKS = weeks_in_range(RRT_CCU_START, date(2027, 6, 21))
@@ -618,6 +646,14 @@ def build_model():
 
                 if w not in TPLT_PGY4_WEEKS:
                     model.Add(var(f, w, "TPLT") == 0)
+
+            # Internal Medicine boards blackout: PGY-4 cannot be on specified
+            # high-acuity rotations during their boards week.
+            fellow_name = FELLOWS[f][0]
+            if fellow_name in IM_BOARDS_BLACKOUT_WEEKS:
+                bw = IM_BOARDS_BLACKOUT_WEEKS[fellow_name]
+                for rname in IM_BOARDS_BLOCKED_ROTATIONS:
+                    model.Add(var(f, bw, rname) == 0)
     
         # RRT/CCU only in window
         for w in range(W):
@@ -637,6 +673,17 @@ def build_model():
     # TM must be on RSCH for specified weeks
     for d in TM_RSCH_WEEKS:
         model.Add(var(TM_IDX, widx(d), "RSCH") == 1)
+
+    # AD must be on RSCH for specified weeks
+    ad_idx = next(i for i, (name, _) in enumerate(FELLOWS) if name == "AD")
+    for w in AD_RSCH_WEEKS:
+        model.Add(var(ad_idx, w, "RSCH") == 1)
+
+    # AD must have exactly 2 BRONCH weeks
+    model.Add(sum(var(ad_idx, w, "BRONCH") for w in range(W)) == 2)
+
+    # YA must be on MICU2 on the first week (6/29/26)
+    model.Add(var(YA_IDX, ONBD_WEEK_IDX, "MICU2") == 1)
 
     # TM must have exactly 2 weeks of MICU1 and 2 weeks of MICU2
     model.Add(sum(var(TM_IDX, w, "MICU1") for w in range(W)) == 2)
@@ -817,6 +864,7 @@ def build_model():
         "pgy6_pre_boards_rsch": [],
         "pgy6_last8_rsch_vaca": [],
         "non_sinai_pgy4_micu_early": [],
+        "pgy4_pre_im_boards_tier": [],
         "rsch_exact3": [],
         "fair_hard": [],
         "fair_micu6": [],
@@ -965,6 +1013,15 @@ def build_model():
                 var(f, wp, "MICU1") + var(f, wp, "MICU2") for wp in range(w)
             )
             model.Add(prior_any_micu >= 1).OnlyEnforceIf(var(f, w, "NF"))
+
+    # PGY-4 MICU ordering hard rule: MICU1 must occur before any MICU2.
+    for f in PGY4:
+        for w in range(W):
+            if w == 0:
+                model.Add(var(f, w, "MICU2") == 0)
+                continue
+            prior_micu1 = sum(var(f, wp, "MICU1") for wp in range(w))
+            model.Add(prior_micu1 >= 1).OnlyEnforceIf(var(f, w, "MICU2"))
     
     # PGY-4 MICU first-time rule: at most one PGY-4 can have their first MICU week
     # (MICU1 or MICU2) in the same week.
@@ -1514,6 +1571,37 @@ def build_model():
                     objective_terms.append(WEIGHTS["rsch_around_vaca"] * (is_end - after_rsch))
                     soft_report["rsch_around_vaca"].append((f, w, "after", is_end, after_rsch))
     
+    # PGY-4 IM boards prep preference in the 4 weeks before boards week:
+    # EASY preferred most, then MEDIUM, then HARD (with proximity ramping).
+    pre_im_curve = [1, 1, 2, 3]  # farther -> closer to boards
+    pre_im_medium_w = WEIGHTS["pgy4_pre_im_boards_medium"]
+    pre_im_hard_w = WEIGHTS["pgy4_pre_im_boards_hard"]
+
+    for f in PGY4:
+        fellow_name = FELLOWS[f][0]
+        if fellow_name not in IM_BOARDS_BLACKOUT_WEEKS:
+            continue
+
+        boards_w = IM_BOARDS_BLACKOUT_WEEKS[fellow_name]
+        pre_weeks = [boards_w - 4 + i for i in range(4) if 0 <= boards_w - 4 + i < W]
+        if not pre_weeks:
+            continue
+
+        for i, w in enumerate(pre_weeks):
+            ramp = pre_im_curve[-len(pre_weeks) + i]
+
+            is_medium = model.NewBoolVar(f"pgy4_preim_medium_f{f}_w{w}")
+            model.Add(is_medium == sum(var(f, w, r) for r in MEDIUM))
+
+            is_hard = model.NewBoolVar(f"pgy4_preim_hard_f{f}_w{w}")
+            model.Add(is_hard == sum(var(f, w, r) for r in HARD))
+
+            medium_pen = pre_im_medium_w * ramp
+            hard_pen = pre_im_hard_w * ramp
+            objective_terms.append(medium_pen * is_medium)
+            objective_terms.append(hard_pen * is_hard)
+            soft_report["pgy4_pre_im_boards_tier"].append((f, w, ramp, is_medium, is_hard))
+
     # Pulmonary Boards: prefer PGY-6 on EASY rotations in the 4 weeks prior (weighted toward the end)
     pre_boards_weeks = [w for w, d in enumerate(WEEK_STARTS) if PULM_BOARDS_WEEK - timedelta(days=28) <= d < PULM_BOARDS_WEEK]
     pre_boards_curve = [1, 1, 2, 3]
@@ -1856,6 +1944,31 @@ def write_reports(solver, var, soft_report, suffix: str, output_dir: str = "."):
                 "penalty": pen_val,
             })
 
+    # PGY-4 IM boards prep tiered preference
+    for f, w, ramp, is_medium, is_hard in soft_report["pgy4_pre_im_boards_tier"]:
+        medium_val = solver.Value(is_medium)
+        hard_val = solver.Value(is_hard)
+        if medium_val == 1:
+            weight = WEIGHTS["pgy4_pre_im_boards_medium"] * ramp
+            soft_rows.append({
+                "constraint": "pgy4_pre_im_boards_medium",
+                "fellow": FELLOWS[f][0],
+                "week": WEEK_STARTS[w].isoformat(),
+                "detail": f"pre-boards medium (ramp={ramp})",
+                "weight": weight,
+                "penalty": weight,
+            })
+        if hard_val == 1:
+            weight = WEIGHTS["pgy4_pre_im_boards_hard"] * ramp
+            soft_rows.append({
+                "constraint": "pgy4_pre_im_boards_hard",
+                "fellow": FELLOWS[f][0],
+                "week": WEEK_STARTS[w].isoformat(),
+                "detail": f"pre-boards hard (ramp={ramp})",
+                "weight": weight,
+                "penalty": weight,
+            })
+
     # PGY-6 last 8 weeks RSCH/VACA preference (weighted)
     for f, credit, pen in soft_report["pgy6_last8_rsch_vaca"]:
         pen_val = solver.Value(pen)
@@ -1899,11 +2012,19 @@ def weights_for_stage(stage: int):
         return {k: (BASE_WEIGHTS[k] if k in VAC_KEYS.union(PGY4_ONLY_KEYS) else 0) for k in BASE_WEIGHTS}
     return BASE_WEIGHTS
 
-STAGE1_TIME = 240
+STAGE1_TIME = 300
 STAGE2_TIME = 360
-STAGE3_TIME = 1800
+STAGE3_TIME = 600
 NUM_WORKERS = 8
-SINGLE_RUN_OUTPUT_DIR = "/content/drive/MyDrive/Colab_Notebook"
+OUTPUT_BASE_DIR = "/content/drive/MyDrive/Colab_Notebook"
+RUN_FOLDER_NAME = ""  # Set e.g. "attempt_72"; blank auto-generates a timestamped folder.
+
+
+def resolve_output_dir(base_dir: str, run_folder_name: str = "") -> str:
+    name = run_folder_name.strip()
+    if not name:
+        name = f"run_{time.strftime('%Y%m%d_%H%M%S')}"
+    return str(Path(base_dir) / name)
 
 def run_three_stage(stage1_time: int, stage2_time: int, stage3_time: int, output_dir: str):
     global WEIGHTS
@@ -1994,7 +2115,9 @@ def run_three_stage(stage1_time: int, stage2_time: int, stage3_time: int, output
     result["run_seconds"] = round(time.time() - start, 1)
     return result
 
+run_output_dir = resolve_output_dir(OUTPUT_BASE_DIR, RUN_FOLDER_NAME)
 print(f"Max times (s): Stage1={STAGE1_TIME}, Stage2={STAGE2_TIME}, Stage3={STAGE3_TIME}")
-result = run_three_stage(STAGE1_TIME, STAGE2_TIME, STAGE3_TIME, SINGLE_RUN_OUTPUT_DIR)
+print(f"Output folder: {run_output_dir}")
+result = run_three_stage(STAGE1_TIME, STAGE2_TIME, STAGE3_TIME, run_output_dir)
 if result and "run_seconds" in result:
     print(f"Total runtime (s): {result['run_seconds']}")
