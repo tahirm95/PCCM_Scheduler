@@ -1,3 +1,13 @@
+#!/usr/bin/env python3
+"""Maximum penalty calculator using in-file scheduler model code.
+
+This file directly contains scheduler code (copied from fellowship_scheduler_2026_02_17.py)
+so it does not import or load that file at runtime.
+"""
+
+# ---------------------------
+# BEGIN inlined scheduler code
+# ---------------------------
 #@title Attempt 71 - PGY-4 Boards
 
 # Colab-ready Fellowship Scheduler (OR-Tools CP-SAT)
@@ -2228,9 +2238,151 @@ def run_three_stage(stage1_time: int, stage2_time: int, stage3_time: int, output
     result["run_seconds"] = round(time.time() - start, 1)
     return result
 
-run_output_dir = resolve_output_dir(OUTPUT_BASE_DIR, RUN_FOLDER_NAME)
-print(f"Max times (s): Stage1={STAGE1_TIME}, Stage2={STAGE2_TIME}, Stage3={STAGE3_TIME}")
-print(f"Output folder: {run_output_dir}")
-result = run_three_stage(STAGE1_TIME, STAGE2_TIME, STAGE3_TIME, run_output_dir)
-if result and "run_seconds" in result:
-    print(f"Total runtime (s): {result['run_seconds']}")
+
+# ---------------------------
+# END inlined scheduler code
+# ---------------------------
+
+import csv
+from collections import defaultdict
+from pathlib import Path
+from ortools.sat.python import cp_model
+
+# Colab in-file settings (edit these directly before running the cell/script).
+RUN_MODE = "bound"  # "exact" or "bound"
+RUN_TIME_LIMIT = 600
+RUN_WORKERS = 8
+RUN_OUTPUT_DIR = "max_penalty_outputs"
+
+
+def _flip_to_maximize(model: cp_model.CpModel) -> None:
+    """Convert an already-built minimize objective to maximize the same expression."""
+    proto = model.Proto()
+    sf = proto.objective.scaling_factor if proto.objective.scaling_factor != 0 else 1.0
+    proto.objective.scaling_factor = -abs(sf)
+
+
+def _ensure_output_dir(out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _constraint_bucket(var_name: str) -> str:
+    prefixes = [
+        ("clinic_underfill_ge_", "clinic_underfill"),
+        ("rsch_exact3_", "rsch_exact3"),
+        ("pgy4_pulm_pair_pen_", "pulm_pair_pgy4"),
+        ("pgy4_micu_pair_pen_", "micu_pair_pgy4"),
+        ("hard3_", "hard_3_run"),
+        ("hard5_", "hard_5_run"),
+        ("post_nf_medium_", "post_nf_medium"),
+        ("post_nf_hard_", "post_nf_hard"),
+        ("rif_when_min_", "rif_when_rads_min"),
+        ("non_sinai", "non_sinai_pgy4_micu_early"),
+        ("pgy4_preim_medium", "pgy4_pre_im_boards_medium"),
+        ("pgy4_preim_hard", "pgy4_pre_im_boards_hard"),
+        ("pgy6_pre_boards_pen_", "pgy6_pre_boards_rsch"),
+        ("pgy6_last8_pen_", "pgy6_last8_rsch_vaca"),
+        ("micu_after_nf_", "micu_after_first_nf"),
+        ("vac_", "vacation"),
+        ("fair_", "fairness"),
+    ]
+    for pref, bucket in prefixes:
+        if var_name.startswith(pref) or pref in var_name:
+            return bucket
+    if var_name.startswith("x_f"):
+        return "assignment_linear_terms"
+    return "other"
+
+
+def run_exact(time_limit: int, workers: int, out_dir: Path):
+    global WEIGHTS
+    WEIGHTS = BASE_WEIGHTS.copy()
+    model, var, _, _, soft_report = build_model()
+    _flip_to_maximize(model)
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = time_limit
+    solver.parameters.num_search_workers = workers
+    status = solver.Solve(model)
+    status_name = solver.StatusName(status)
+    objective = solver.ObjectiveValue()
+
+    suffix = "maxpen_exact"
+    write_reports(solver, var, soft_report, suffix, output_dir=str(out_dir))
+    soft_path = out_dir / f"soft_constraint_report_{suffix}.csv"
+
+    by_constraint = defaultdict(float)
+    if soft_path.exists() and soft_path.stat().st_size > 0:
+        with soft_path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    by_constraint[row.get("constraint", "")] += float(row.get("penalty", 0) or 0)
+                except ValueError:
+                    continue
+
+    breakdown_csv = out_dir / "max_penalty_exact_breakdown.csv"
+    with breakdown_csv.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["constraint", "penalty_sum"])
+        total = 0.0
+        for c, p in sorted(by_constraint.items()):
+            writer.writerow([c, p])
+            total += p
+        writer.writerow(["TOTAL_FROM_SOFT_REPORT", total])
+        writer.writerow(["OBJECTIVE_VALUE", objective])
+        writer.writerow(["STATUS", status_name])
+
+    print("Mode: exact")
+    print(f"Status: {status_name}")
+    print(f"Best objective (maximize): {objective}")
+    print(f"Per-constraint CSV: {breakdown_csv}")
+
+
+def run_bound(out_dir: Path):
+    global WEIGHTS
+    WEIGHTS = BASE_WEIGHTS.copy()
+    model, _, _, _, _ = build_model()
+    proto = model.Proto()
+
+    contrib = defaultdict(float)
+    total = 0.0
+    for var_idx, coeff in zip(proto.objective.vars, proto.objective.coeffs):
+        v = proto.variables[var_idx]
+        dom = list(v.domain)
+        min_val = min(dom[::2])
+        max_val = max(dom[1::2])
+        chosen = max_val if coeff >= 0 else min_val
+        term_val = float(coeff) * float(chosen)
+        bucket = _constraint_bucket(v.name)
+        contrib[bucket] += term_val
+        total += term_val
+
+    breakdown_csv = out_dir / "max_penalty_bound_breakdown.csv"
+    with breakdown_csv.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["constraint_bucket", "upper_bound_contribution"])
+        for k in sorted(contrib):
+            writer.writerow([k, contrib[k]])
+        writer.writerow(["TOTAL_BOUND", total])
+
+    print("Mode: bound")
+    print("Method: objective coefficient × variable-domain extrema (fast upper bound)")
+    print(f"Upper bound total: {total}")
+    print(f"Per-constraint bucket CSV: {breakdown_csv}")
+
+
+def main():
+    out_dir = Path(RUN_OUTPUT_DIR)
+    _ensure_output_dir(out_dir)
+
+    if RUN_MODE == "exact":
+        run_exact(RUN_TIME_LIMIT, RUN_WORKERS, out_dir)
+    elif RUN_MODE == "bound":
+        run_bound(out_dir)
+    else:
+        raise ValueError("RUN_MODE must be 'exact' or 'bound'.")
+
+
+if __name__ == "__main__":
+    main()
